@@ -4,56 +4,33 @@ import pandas as pd
 import time
 from tqdm import tqdm
 import os
+from argparse import ArgumentParser
+
+parser = ArgumentParser()
+parser.add_argument("--col", nargs="*")
+parser.add_argument("--row", nargs="*")
+parser.add_argument("--board")
+
+args = parser.parse_args()
+COLUMN = args.col if type(args.col)==list else [args.col]
+ROW    = args.row if type(args.row)==list else [args.row]
+BOARD  = int(args.board)
+
+COLUMN = int(COLUMN[0])
+ROW = int(ROW[0])
 
 ''' 
 Require events to have exactly one hit in each board
 And to have CALcode values that are close to the average CALcode
 '''
 def filterEvents(event, pixel):
-    col = pixel[0]
-    row = pixel[1]
+    board = pixel[0]
+    col = pixel[1]
+    row = pixel[2]
     if not len(event) == 4: return False
     if not len(event['board']) == len(np.unique(event['board'])): return False
-    #if not (list(event['col'])[3]==col and list(event['row'])[3]==row): return False
+    if not list(event['col'])[board]==col and list(event['row'])[board]==row: return False
     return True
-
-def draw1Dhist(hist, opt="HIST"):
-    c = R.TCanvas(f"c_{hist.GetName()}","")
-    c.cd()
-    c.SetLogy(0)
-    hist.Draw(opt)
-    return c
-
-def drawProfile2D(hcalprof, zmin, zmax):
-    c = R.TCanvas(f"c_{hcalprof.GetName()}","")
-    c.cd()
-    R.gStyle.SetPaintTextFormat("0.f")
-    hcalprof.SetMinimum(zmin)
-    hcalprof.SetMaximum(zmax)
-    hcalprof.Draw("COLZ,TEXT")
-    return c
-
-def getAvCAL(cal, board, col, row):
-    if len(cal) == 0: return 0
-    c = R.TCanvas(f"cal_B{board}C{col}R{row}")
-    c.cd()
-    c.SetLogy()
-    h = R.TH1F(f"hB{board}C{col}R{row}", "", 1024, 0., 1024.) # CAL ranges between 0 and 1023
-    h.FillN(len(cal), cal, np.ones(len(cal)))
-    maxval = h.GetMaximumBin()
-    f = R.TF1(f"fB{board}C{col}R{row}","gaus")
-    f.SetParameter(1,maxval)
-    h.Fit(f"fB{board}C{col}R{row}","q","",maxval-3,maxval+3);
-    h.SetFillColor(R.kGreen-10)
-    h.GetXaxis().SetRangeUser(maxval-50,maxval+50)
-    f.SetLineWidth(2)
-    f.SetLineColor(R.kRed)
-    h.SetMinimum(0.01)
-    h.Draw()
-    l = R.TLine(f.GetParameter(1),0.,f.GetParameter(1),h.GetMaximum())
-    l.Draw("L,SAME")
-    c.SaveAs(f"hists_cal/cal_B{board}C{col}R{row}.png")
-    return f.GetParameter(1)
 
 def plotMulti1D(c, hists, names, colors):
     c = R.TCanvas(f"{c}","",1600,800)
@@ -101,7 +78,7 @@ def compute_time_res(df, board, col, row):
     if len(tracks_df)<2000: return [0,0,0]
     tot = []
     toa = []
-    for i in range(3):
+    for i in range(4):
         bdata = tracks_df
         tot.append(np.array(bdata[bdata['board']==i+1]['tot_ps']))
         toa.append(np.array(bdata[bdata['board']==i+1]['toa_ps']))
@@ -170,7 +147,7 @@ if __name__=='__main__':
     dfs = []
     end_evt = 0
     for i in range(1):
-        dftemp = pd.read_feather(f'datos/loop_{i}.feather')
+        dftemp = pd.read_feather(f'datos/filtered_acal_ALL.feather')
         dftemp['evt'] += end_evt
         end_evt = max(dftemp['evt'])+1
         print(dftemp)
@@ -178,108 +155,20 @@ if __name__=='__main__':
     df = pd.concat(dfs)
     print(df)
 
-    # Filter events
-    print("Filtering events...")
-    start = time.time()
-    COL = 11
-    ROW = 9
-    df = df.groupby('evt').filter(filterEvents, pixel=[COL, ROW])
-    end = time.time()
-    print(f"Elapsed time: {end-start:.3f} s")
-
     R.gROOT.ProcessLine('.L ./tdrstyle.C')
     R.gROOT.SetBatch(1)
     R.setTDRStyle()
 
-    # Fill histograms of avergae cal per pixel and cal vs time
-    h_acal = []
-    h_cal_time = []
-    h_cal = []
-    for i in range(4):
-        # Compute average cal
-        h_acal_temp = R.TH2F(f"h_cal_B{i}", f"Board {i};col;row", 16, -0., 16., 16, -0., 16.)
-        for col in tqdm(range(16)):
-            for row in range(16):
-                dft = df[df['board']==i]
-                dft = dft[dft['col']==col]
-                dft = dft[dft['row']==row]
-                cal = np.array(dft['cal'], dtype=float)
-                acal = getAvCAL(cal, i, col, row)
-                h_acal_temp.Fill(col, row, acal)
-    
-                event = np.array(dft['evt'], dtype=float)
-                if len(event) == 0:
-                    h_cal_time_temp = R.TH2F(f"h_cal_time_B{i}C{col}R{row}", f"B{i}C{col}R{row};Event;calCODE",
-                                         1, 0., 1., 7, int(acal)-3, int(acal)+4)
-                    h_cal_time.append(h_cal_time_temp)
-                    h_cal_temp = R.TH1F(f"h_cal_B{i}C{col}R{row}", f"B{i}C{col}R{row};calCODE",
-                                         7, int(acal)-3, int(acal)+4)
-                    h_cal.append(h_cal_temp)
-                else:
-                    h_cal_time_temp = R.TH2F(f"h_cal_time_B{i}C{col}R{row}", f"B{i}C{col}R{row};Event;calCODE",
-                                         len(event), min(event), max(event)+1, 7, int(acal)-3, int(acal)+4)
-                    h_cal_time_temp.FillN(len(event), event, cal, np.ones(len(event)))
-                    h_cal_time.append(h_cal_time_temp)
-                    h_cal_temp = R.TH1F(f"h_cal_B{i}C{col}R{row}", f"B{i}C{col}R{row};calCODE",
-                                         7, int(acal)-3, int(acal)+4)
-                    h_cal_temp.FillN(len(event), cal, np.ones(len(event)))
-                    h_cal.append(h_cal_temp)
-        h_acal.append(h_acal_temp)
-
-    # Produce plots
-    '''if not os.path.exists('hists_acal'): os.makedirs('hists_acal')
-    if not os.path.exists('hists_cal_evt'): os.makedirs('hists_cal_evt')
-    if not os.path.exists('hists_cal'): os.makedirs('hists_cal')
-
-    R.gStyle.SetPaintTextFormat("0.f")
-    for i in range(4):
-        cprof = R.TCanvas(f"cprof_B{i}","",800,800)
-        cprof.cd()
-        h_acal[i].Draw("COLZ,TEXT")
-        h_acal[i].SetMinimum(h_acal[i].GetBinContent(16,14)-5)
-        h_acal[i].SetMaximum(h_acal[i].GetBinContent(3,2)+5)
-        cprof.SaveAs(f'hists_acal/acal_board_{i}.png')
-
-    for board in range(4):
-        for col in range(16):
-            for row in range(16):
-                cprof = R.TCanvas(f"c_B{board}C{col}R{row}","",800,800)
-                cprof.cd()
-                h_cal_time[32*board+16*col+row].Draw("COLZ")
-                cprof.SaveAs(f'hists_cal_evt/cal_B{board}C{col}R{row}.png')
-                #cprof = R.TCanvas(f"c_B{board}C{col}R{row}","",800,800)
-                #cprof.cd()
-                #h_cal[32*board+16*col+row].SetFillColor(R.kGreen-10)
-                #h_cal[32*board+16*col+row].Draw("COLZ")
-                #l = R.TLine(h_acal[board].GetBinContent(col,row),0.,h_acal[board].GetBinContent(col,row),h_cal[32*board+16*col+row].GetMaximum())
-                #l.SetLineWidth(2)
-                #l.Draw("SAME")
-                #cprof.SaveAs(f'hists_cal/cal_B{board}C{col}R{row}.png')'''
-
-    # Compute acal column
-    print('- Adding average cal column')
-    df['acal'] = df.apply(lambda x: h_acal[x['board']].GetBinContent(int(x['col']),int(x['row'])), axis=1)
-
-    cdiff = R.TCanvas("cdiff", "", 800, 800)
-    cdiff.cd()
-    cdiff.SetLogy()
-    h = R.TH1F("hdiff",";aCAL - CAL;N events",40,-20,20)
-    diff = np.array(df[df['board']==3][df['col']==3][df['row']==11]['acal']-df[df['board']==3][df['col']==3][df['row']==11]['cal'], dtype=float)
-    h.FillN(len(diff), diff, np.ones(len(diff)))
-    h.Fit("gauss")
-    h.SetFillColor(R.kRed-10)
-    h.Draw("HIST")
-    cdiff.SaveAs('caldiff.png')
-
     # Remove events with bad cal
     print('- Remove events with bad cal')
     df = df[abs(df['acal']-df['cal'])<4]
-    #df = df.groupby('evt').filter(lambda x: len(x)==4 and list(x['col'])[3]==COL and list(x['row'])[3]==ROW)
 
     # Filter events
     print("Filtering events...")
+    tqdm.pandas()
     start = time.time()
-    df = df.groupby('evt').filter(filterEvents, pixel=[COL,ROW])
+    df = df.groupby('evt').filter(filterEvents, pixel=[BOARD,COLUMN,ROW])
+    #df = df.groupby('evt').filter(lambda x: len(x)==4 and list(x['col'])[3]==COL and list(x['row'])[3]==ROW)
     end = time.time()
     print(f"Elapsed time: {end-start:.3f} s")
 
@@ -296,7 +185,7 @@ if __name__=='__main__':
     leg = []
     toa, htoa = [], []
     for i in range(4):
-        toa.append(np.array(df[df['board']==3]['toa_ps'], dtype=float))
+        toa.append(np.array(df[df['board']==i]['toa_ps'], dtype=float))
         htoa.append(R.TH1F(f"htoa{i}",";TOA [ps];N events", NBINS, 0., 12500.))
         htoa[i].FillN(len(toa[i]), toa[i], np.ones(len(toa[i])))
         leg.append(f"Board {i}")
@@ -306,7 +195,7 @@ if __name__=='__main__':
     leg = []
     tot, htot = [], []
     for i in range(4):
-        tot.append(np.array(df[df['board']==3]['tot_ps'], dtype=float))
+        tot.append(np.array(df[df['board']==i]['tot_ps'], dtype=float))
         htot.append(R.TH1F(f"htot{i}",";TOT [ps];N events", NBINS, 0., 12500.))
         htot[i].FillN(len(tot[i]), tot[i], np.ones(len(tot[i])))
         leg.append(f"Board {i}")
@@ -316,16 +205,6 @@ if __name__=='__main__':
     ctoa.SaveAs("h_toa_Average_pm4.png")
     ctot.SaveAs("h_tot_Average_pm4.png")
 
-    '''timeres = []
-    h_timeres = R.TH2F("h_timeres", f"Board 3;col;row", 16, -0., 16., 16, -0., 16.)
-    for col in range(16):
-        for row in range(16):
-            sigmas = compute_time_res(df, 3, col, row)
-            h_timeres.Fill(col,row,sigmas[2])
-            timeres.append(sigmas[2])
-    c = R.TCanvas("c","",800,800)
-    c.cd()
-    R.gStyle.SetPaintTextFormat("1.f")
-    h_timeres.Draw("COLZ,TEXT")
-    c.SaveAs("timeRes_board2.png")
-    print(timeres)'''
+    print("Computing time resolution...")
+    sigmas = compute_time_res(df, BOARD, COLUMN, ROW)
+    print(f"Time resoultion for board {BOARD}, pixel ({COLUMN},{ROW}): {sigmas[BOARD-1]} ps")
