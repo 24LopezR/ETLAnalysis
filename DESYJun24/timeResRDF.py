@@ -58,7 +58,7 @@ def declareVariables(RDF):
 if __name__=='__main__':
 
     files = []
-    for i in range(4):
+    for i in range(1):
         fileIn = f"rootFiles/loop_{i}.root"
         files.append(fileIn)
     print(files)
@@ -148,7 +148,7 @@ if __name__=='__main__':
         hmodels = [h1,h2,h3]
         hprof = []
         for j in range(3):
-            hprof.append(RDF.Profile1D(hmodels[j],f"tot_ps{j+1}",f"deltatoa{j+1}")
+            hprof.append(RDF.Profile1D(hmodels[j],f"tot_ps{j+1}",f"deltatoa{j+1}"))
     
         ctwc = R.TCanvas("ctwc", "", 1800, 600)
         ctwc.Divide(3,1)
@@ -164,6 +164,9 @@ if __name__=='__main__':
         RDF = RDF.Define("toa_ps1",f"toa_ps[1] + {f1pars[0]} + {f1pars[1]}*tot_ps1 + {f1pars[2]}*tot_ps1*tot_ps1")
         RDF = RDF.Define("toa_ps2",f"toa_ps[2] + {f2pars[0]} + {f2pars[1]}*tot_ps2 + {f2pars[2]}*tot_ps2*tot_ps2")
         RDF = RDF.Define("toa_ps3",f"toa_ps[3] + {f3pars[0]} + {f3pars[1]}*tot_ps3 + {f3pars[2]}*tot_ps3*tot_ps3")
+        RDF = RDF.Redefine("toa12","toa_ps1-toa_ps2")
+        RDF = RDF.Redefine("toa23","toa_ps2-toa_ps3")
+        RDF = RDF.Redefine("toa31","toa_ps3-toa_ps1")
         return RDF
 
     # Get time resolution before TWC
@@ -171,7 +174,7 @@ if __name__=='__main__':
     print(sigmasBefore)
 
     # Compute TWC
-    RDF = apply(RDF)
+    RDF = applyTWC(RDF)
 
     # Get time resolution after TWC 
     sigmasAfter = getTimeRes(RDF, "timeResAfter.png")
